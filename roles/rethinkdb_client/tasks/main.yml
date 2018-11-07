@@ -1,0 +1,13 @@
+- name: apt-get update
+  apt: update-cache=yes
+
+- name: setup nodejs
+  apt: pkg=nodejs=6.10.3-hh1 force=yes install_recommends=no
+
+- name: install recli npm package
+  npm: name=recli global=yes
+
+- name: copy cron for unassigning stf devices
+  template: src=roles/rethinkdb_client/templates/{{ item.file }} dest=/{{ item.file }} owner=root group=root mode={{ item.mode }}
+  with_items:
+    - { file: 'etc/cron.daily/unassign_stf_devices', mode: '775' }

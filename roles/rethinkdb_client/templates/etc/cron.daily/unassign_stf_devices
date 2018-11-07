@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+
+recli -d stf 'r.table("devices").filter(r.row("owner").ne(null)).update({owner: null})'

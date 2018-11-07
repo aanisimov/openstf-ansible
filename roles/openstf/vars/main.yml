@@ -1,0 +1,10 @@
+dns_server: "8.8.8.8"
+use_ldap: true
+auth_url: "auth/ldap" # set to auth/mock if you're not using ldap
+ldap_url: "ldap://test.ldap.server:389"
+ldap_bind_dn: "cn=test,ou=user,dc=test"
+ldap_password: "test" # better to provide this in runtime
+ldap_search_sn: "ou=Office"
+ldap_search_scope: "sub"
+ldap_search_field: "Name"
+stf_secret: "123456"

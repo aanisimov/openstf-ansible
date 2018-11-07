@@ -1,0 +1,247 @@
+- name: create users for stf
+  user: name={{ item.username }} uid={{ item.uid }} group=nogroup comment={{ item.username }} shell=/bin/false createhome=no home=/dev/null
+  with_items:
+      - { username: 'stf', uid: 998 }
+      - { username: 'stf-build', uid: 999 }
+
+- name: make dirs
+  file: path={{ item.path }} state=directory recurse=yes owner={{ item.owner }} group=nogroup
+  with_items:
+      - { path: '/srv/stf', owner: root }
+      - { path: '/srv/stf/scripts', owner: root }
+      - { path: '/srv/rethinkdb', owner: root }
+      - { path: '/srv/stf/storage', owner: 998 }
+
+- name: apt-get update
+  apt: update-cache=yes
+
+- name: setup packages w/o versions
+  apt: pkg={{ item.deb }} force=yes state=latest update_cache=no
+  with_items:
+      - { deb: android-tools-adb }
+
+- name: copy configs for adb and nginx
+  template: src=roles/openstf/templates/{{ item.file }} dest=/{{ item.file }} owner=root group=root mode={{ item.mode }}
+  with_items:
+    - { file: 'etc/systemd/system/adbd.service', mode: '644' }
+    - { file: 'srv/stf/nginx.conf', mode: '644' }
+
+- service:
+    name: adbd
+    state: started
+
+- name: "Launch rethinkdb container"
+  docker_container:
+    name: rethinkdb
+    image: rethinkdb
+    state: started
+    restart_policy: always
+    network_mode: host
+    command: rethinkdb --bind all --cache-size 8192 --http-port 8090
+    ports:
+     - 28015:28015
+    volumes:
+    - /srv/rethinkdb:/data
+
+- name: "Launch nginx container"
+  docker_container:
+    name: nginx
+    image: nginx
+    state: started
+    restart_policy: always
+    network_mode: host
+    command: nginx
+    volumes:
+    - /srv/stf/nginx.conf:/etc/nginx/nginx.conf:ro
+
+- name: "Launch stf-migrate container"
+  docker_container:
+    name: stf-migrate
+    image: openstf/stf
+    state: started
+    network_mode: host
+    command: stf migrate
+
+- name: "Launch storage-plugin-apk-3300 container"
+  docker_container:
+    name: storage-plugin-apk-3300
+    image: openstf/stf
+    state: started
+    restart_policy: always
+    dns_servers:
+      - "{{ dns_server }}"
+    network_mode: host
+    ports:
+      - 3300:3300
+    command: 'stf storage-plugin-apk  --port 3300 --storage-url http://{{ inventory_hostname }}/'
+
+- name: "Launch storage-plugin-image-3400 container"
+  docker_container:
+    name: storage-plugin-image-3400
+    image: openstf/stf
+    state: started
+    restart_policy: always
+    dns_servers:
+      - "{{ dns_server }}"
+    network_mode: host
+    ports:
+      - 3400:3400
+    command: 'stf storage-plugin-image --port 3400 --storage-url http://{{ inventory_hostname }}/'
+
+- name: "Launch storage-temp-3500 container"
+  docker_container:
+    name: storage-temp-3500
+    image: openstf/stf
+    state: started
+    restart_policy: always
+    dns_servers:
+      - "{{ dns_server }}"
+    network_mode: host
+    ports:
+      - 3500:3500
+    volumes:
+      - /srv/stf/storage:/data
+    command: stf storage-temp  --port 3500 --save-dir /data
+
+- name: "Launch triproxy-app container"
+  docker_container:
+    name: triproxy-app
+    image: openstf/stf
+    state: started
+    restart_policy: always
+    network_mode: host
+    command: stf triproxy app --bind-pub "tcp://*:7150" --bind-dealer "tcp://*:7160" --bind-pull "tcp://*:7170"
+
+- name: "Launch triproxy-dev container"
+  docker_container:
+    name: triproxy-dev
+    image: openstf/stf
+    state: started
+    restart_policy: always
+    network_mode: host
+    command: stf triproxy dev --bind-pub "tcp://*:7250" --bind-dealer "tcp://*:7260" --bind-pull "tcp://*:7270"
+
+- name: "Launch stf-auth-3200 container"
+  docker_container:
+    name: stf-auth-3200
+    image: openstf/stf
+    state: started
+    restart_policy: always
+    dns_servers:
+      - "{{ dns_server }}"
+    network_mode: host
+    env:
+      SECRET: "{{ stf_secret }}"
+    ports:
+      - 3200:3200
+    command: 'stf auth-ldap --port 3200 --app-url http://{{ inventory_hostname }}/
+                            --ldap-url {{ ldap_url }}
+                            --ldap-bind-dn "{{ ldap_bind_dn }}"
+                            --ldap-bind-credentials {{ ldap_password }}
+                            --ldap-search-dn "{{ ldap_search_sn }}"
+                            --ldap-search-scope "{{ ldap_search_scope }}"
+                            --ldap-search-field "{{ ldap_search_field }}"'
+  when: use_ldap is defined
+
+- name: "Launch stf-auth-3200 container"
+  docker_container:
+    name: stf-auth-3200
+    image: openstf/stf
+    state: started
+    restart_policy: always
+    dns_servers:
+      - "{{ dns_server }}"
+    network_mode: host
+    env:
+      SECRET: "{{ stf_secret }}"
+    ports:
+      - 3200:3200
+    command: 'stf auth-mock --port 3200 --app-url http://{{ inventory_hostname }}/'
+  when: use_ldap is not defined
+
+- name: "Launch stf-api container"
+  docker_container:
+    name: stf-api
+    image: openstf/stf
+    state: started
+    restart_policy: always
+    dns_servers:
+      - "{{ dns_server }}"
+    env:
+      SECRET: "{{ stf_secret }}"
+    network_mode: host
+    ports:
+      - 3700:3700
+    command: 'stf api --port 3700 --connect-sub tcp://{{ inventory_hostname }}:7150  --connect-push tcp://{{ inventory_hostname }}:7170'
+
+- name: "Launch stf-app-3100 container"
+  docker_container:
+    name: stf-app-3100
+    image: openstf/stf
+    state: started
+    restart_policy: always
+    dns_servers:
+      - "{{ dns_server }}"
+    env:
+      SECRET: "{{ stf_secret }}"
+    network_mode: host
+    ports:
+      - 3100:3100
+    command: 'stf app --port 3100 --auth-url http://{{ inventory_hostname }}/{{ auth_url }}/ --websocket-url http://{{ inventory_hostname }}/'
+
+- name: "Launch stf-processor"
+  docker_container:
+    name: stf-processor
+    image: openstf/stf
+    state: started
+    restart_policy: always
+    dns_servers:
+      - "{{ dns_server }}"
+    env:
+      SECRET: "{{ stf_secret }}"
+    network_mode: host
+    ports:
+      - 3100:3000
+    command: 'stf processor stf-processor.service --connect-app-dealer tcp://{{ inventory_hostname }}:7160 --connect-dev-dealer tcp://{{ inventory_hostname }}:7260'
+
+- name: "Launch websocket container"
+  docker_container:
+    name: websocket
+    image: openstf/stf
+    state: started
+    restart_policy: always
+    dns_servers:
+      - "{{ dns_server }}"
+    env:
+      SECRET: "{{ stf_secret }}"
+    network_mode: host
+    ports:
+      - 3600
+    command: 'stf websocket --port 3600 --storage-url http://{{ inventory_hostname }}/ --connect-sub tcp://{{ inventory_hostname }}:7150 --connect-push tcp://{{ inventory_hostname }}:7170'
+
+- name: "Launch reaper container"
+  docker_container:
+    name: reaper
+    image: openstf/stf
+    state: started
+    restart_policy: always
+    dns_servers:
+      - "{{ dns_server }}"
+    env:
+      SECRET: "{{ stf_secret }}"
+    network_mode: host
+    command: 'stf reaper dev --connect-push tcp://{{ inventory_hostname }}:7270 --connect-sub tcp://{{ inventory_hostname }}:7150 --heartbeat-timeout 30000'
+
+- name: "Launch provider container"
+  docker_container:
+    name: provider1
+    image: openstf/stf
+    state: started
+    restart_policy: always
+    dns_servers:
+      - "{{ dns_server }}"
+    env:
+      SECRET: "{{ stf_secret }}"
+    network_mode: host
+    command: 'stf provider --name "provider-{{ inventory_hostname }}" --connect-sub tcp://{{ inventory_hostname }}:7250 --connect-push tcp://{{ inventory_hostname }}:7270 --storage-url http://{{ inventory_hostname }} --public-ip {{ inventory_hostname }} --min-port=15000 --max-port=25000 --heartbeat-interval 20000 --group-timeout 86400 --screen-ws-url-pattern "ws://{{ inventory_hostname }}/d/floor4/<%= serial %>/<%= publicPort %>/"'
+
