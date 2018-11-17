@@ -12,13 +12,29 @@
       - { path: '/srv/rethinkdb', owner: root }
       - { path: '/srv/stf/storage', owner: 998 }
 
+- name: add docker repo key
+  apt_key:
+    keyserver: hkp://p80.pool.sks-keyservers.net:80 
+    id: 58118E89F3A912897C070ADBF76221572C52609D
+    state: present 
+
+- name: add docker repository
+  apt_repository:
+    repo: deb https://apt.dockerproject.org/repo ubuntu-xenial main
+    state: present
+
 - name: apt-get update
   apt: update-cache=yes
 
 - name: setup packages w/o versions
   apt: pkg={{ item.deb }} force=yes state=latest update_cache=no
   with_items:
+      - { deb: docker-engine }
       - { deb: android-tools-adb }
+
+- name: install docker-py
+  pip:
+    name: docker
 
 - name: copy configs for adb and nginx
   template: src=roles/openstf/templates/{{ item.file }} dest=/{{ item.file }} owner=root group=root mode={{ item.mode }}

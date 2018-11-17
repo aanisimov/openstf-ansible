@@ -2,7 +2,10 @@
   apt: update-cache=yes
 
 - name: setup nodejs
-  apt: pkg=nodejs=6.10.3-hh1 force=yes install_recommends=no
+  apt: pkg=nodejs force=yes install_recommends=yes
+
+- name: setup npm
+  apt: pkg=npm force=yes install_recommends=no
 
 - name: install recli npm package
   npm: name=recli global=yes
